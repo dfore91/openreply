@@ -56,4 +56,8 @@ EXPOSE 3000
 # Default to the web process — the worker service overrides this with
 # `command: ["npm", "run", "worker"]` in whatever compose/stack file deploys
 # it (see openreply-vps.stack.yml in EvolutionAPI/omni-nexus for an example).
-CMD ["npm", "run", "start"]
+# Coolify/self-host: one image, three processes. APP_START picks which one.
+#   web    (default) → npx prisma migrate deploy && npm run start
+#   worker           → npm run worker
+#   cron             → sh scripts/cron.sh
+CMD ["sh", "-c", "${APP_START:-npm run start}"]
