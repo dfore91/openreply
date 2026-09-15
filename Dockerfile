@@ -60,4 +60,5 @@ EXPOSE 3000
 #   web    (default) → npx prisma migrate deploy && npm run start
 #   worker           → npm run worker
 #   cron             → sh scripts/cron.sh
-CMD ["sh", "-c", "${APP_START:-npm run start}"]
+# `eval` so APP_START can chain commands (`a && b`); a bare expansion is not re-parsed for operators.
+CMD ["sh", "-c", "eval \"${APP_START:-npm run start}\""]
