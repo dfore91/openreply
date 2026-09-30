@@ -157,3 +157,43 @@ describe("releaseDMSlot", () => {
     expect(mockDel).toHaveBeenCalledWith("rate:dm:account_123");
   });
 });
+
+describe("hourlyCapFor (warm-up)", () => {
+  const IG = "17841401912988095";
+  const day = (iso: string) => Date.parse(`${iso}T15:00:00Z`);
+  const warm = JSON.stringify({ [IG]: { start: "2026-09-30", perHour: 10, dailyGrowth: 1.4 } });
+
+  it("keeps Meta's cap for accounts without a warm-up", async () => {
+    vi.stubEnv("DM_WARMUP", warm);
+    const { hourlyCapFor } = await import("../lib/utils/rate-limiter");
+    expect(hourlyCapFor("someone_else", day("2026-09-30"))).toBe(RATE_LIMIT_MAX);
+  });
+
+  it("starts low and rises every day", async () => {
+    vi.stubEnv("DM_WARMUP", warm);
+    const { hourlyCapFor } = await import("../lib/utils/rate-limiter");
+    expect(hourlyCapFor(IG, day("2026-09-30"))).toBe(10);
+    expect(hourlyCapFor(IG, day("2026-10-01"))).toBe(14);
+    expect(hourlyCapFor(IG, day("2026-10-03"))).toBe(27);
+    expect(hourlyCapFor(IG, day("2026-12-31"))).toBe(RATE_LIMIT_MAX);
+  });
+
+  it("falls back to Meta's cap on a malformed variable", async () => {
+    vi.stubEnv("DM_WARMUP", "{not json");
+    const { hourlyCapFor } = await import("../lib/utils/rate-limiter");
+    expect(hourlyCapFor(IG, day("2026-09-30"))).toBe(RATE_LIMIT_MAX);
+  });
+
+  it("reserves against the warm-up cap", async () => {
+    vi.stubEnv("DM_WARMUP", warm);
+    mockEval.mockResolvedValue([0, 10, 0]);
+    await reserveDMSlot(IG);
+    expect(mockEval.mock.calls.at(-1)?.[3]).toBe(hourlyCapFor_now(IG));
+  });
+});
+
+function hourlyCapFor_now(id: string): number {
+  // Same formula as the limiter, evaluated at the moment of the call.
+  const days = Math.max(0, Math.floor((Date.now() - Date.parse("2026-09-30T00:00:00Z")) / 86_400_000));
+  return Math.min(RATE_LIMIT_MAX, Math.max(1, Math.floor(10 * Math.pow(1.4, days))));
+}

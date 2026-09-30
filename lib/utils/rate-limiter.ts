@@ -17,6 +17,45 @@
 import Redis from "ioredis";
 
 const RATE_LIMIT_MAX = 750; // private replies per hour, per Meta's documented cap
+
+/**
+ * Per-account warm-up (Cacao fork, 2026-09-30).
+ *
+ * Meta's 750/hour is a ceiling, not what Instagram's anti-spam tolerates from
+ * an account that has never sent automated DMs. @carolinaforero_ was blocked
+ * after 140 DMs in 75 minutes on her first night, and again after ~60-75/hour
+ * held for five hours. A warm-up starts an account low and raises its hourly
+ * cap every day on its own:
+ *
+ *   DM_WARMUP='{"<instagramId>":{"start":"2026-09-30","perHour":10,"dailyGrowth":1.4}}'
+ *
+ * cap = floor(perHour * dailyGrowth ^ fullDaysSince(start)), never above
+ * RATE_LIMIT_MAX. Days count from 00:00 UTC of `start`. Accounts not listed
+ * (and a missing or malformed variable) keep RATE_LIMIT_MAX.
+ */
+type Warmup = { start: string; perHour: number; dailyGrowth: number };
+
+function readWarmups(): Record<string, Warmup> {
+  const raw = process.env.DM_WARMUP;
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, Warmup>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function hourlyCapFor(instagramAccountId: string, now: number = Date.now()): number {
+  const w = readWarmups()[instagramAccountId];
+  if (!w) return RATE_LIMIT_MAX;
+  const start = Date.parse(`${w.start}T00:00:00Z`);
+  const perHour = Number(w.perHour);
+  const growth = Number(w.dailyGrowth);
+  if (!Number.isFinite(start) || !(perHour > 0) || !(growth >= 1)) return RATE_LIMIT_MAX;
+  const days = Math.max(0, Math.floor((now - start) / 86_400_000));
+  return Math.min(RATE_LIMIT_MAX, Math.max(1, Math.floor(perHour * Math.pow(growth, days))));
+}
 const RATE_LIMIT_WINDOW = 3600; // 1 hour in seconds
 const REQUEUE_DELAY_MS = 30 * 60 * 1000; // 30 minutes
 const MAX_REQUEUE_ATTEMPTS = 3;
@@ -109,10 +148,11 @@ export async function checkRateLimit(
   const client = getRedis();
   const key = `rate:dm:${instagramAccountId}`;
 
+  const max = hourlyCapFor(instagramAccountId);
   const currentCount = await client.get(key);
   const count = currentCount ? parseInt(currentCount, 10) : 0;
 
-  if (count >= RATE_LIMIT_MAX) {
+  if (count >= max) {
     // Over the limit
     if (requeueAttempt >= MAX_REQUEUE_ATTEMPTS) {
       // Exceeded max requeue attempts — skip this DM
@@ -141,7 +181,7 @@ export async function checkRateLimit(
   return {
     allowed: true,
     currentCount: count,
-    remainingDMs: RATE_LIMIT_MAX - count,
+    remainingDMs: max - count,
     shouldRequeue: false,
     requeueDelayMs: 0,
     shouldSkip: false,
@@ -165,7 +205,7 @@ export async function reserveDMSlot(
     RESERVE_DM_SLOT_SCRIPT,
     1,
     key,
-    RATE_LIMIT_MAX,
+    hourlyCapFor(instagramAccountId),
     RATE_LIMIT_WINDOW
   );
   const values = Array.isArray(result) ? result : [];
