@@ -57,6 +57,15 @@ interface SweepStat {
   errors: string[];
 }
 
+/** Sweep order: oldest comment first, or newest first when asked. */
+export function orderForSweep<T extends { timestamp: string }>(comments: T[], newestFirst: boolean): T[] {
+  return [...comments].sort((a, b) =>
+    newestFirst
+      ? Date.parse(b.timestamp) - Date.parse(a.timestamp)
+      : Date.parse(a.timestamp) - Date.parse(b.timestamp)
+  );
+}
+
 function errMessage(error: unknown): string {
   if (error instanceof MetaApiError)
     return `Meta ${error.code}: ${error.message}`;
@@ -248,11 +257,15 @@ async function sweepCampaign({
     });
     const handledSet = new Set(handled.map((h) => h.commentId));
 
-    // Oldest first, so whoever commented earliest gets answered first, capped.
-    const fresh = needsAction
-      .filter((c) => !handledSet.has(c.id))
-      .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
-      .slice(0, MAX_NEW_PER_SWEEP);
+    // Oldest first by default, so whoever commented earliest gets answered
+    // first. COMMENT_POLL_ORDER=newest flips it (Cacao fork, 2026-09-30): on a
+    // viral post held back by Meta's app rate limit, a reply to a comment from
+    // twenty hours ago is rarely seen, while a reply to one from five minutes
+    // ago lands while the commenter is still on the post.
+    const fresh = orderForSweep(
+      needsAction.filter((c) => !handledSet.has(c.id)),
+      process.env.COMMENT_POLL_ORDER === "newest"
+    ).slice(0, MAX_NEW_PER_SWEEP);
 
     for (const c of fresh) {
       // No deterministic jobId here: a retained completed/failed job from an

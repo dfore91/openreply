@@ -13,7 +13,7 @@ const { mockPrisma } = vi.hoisted(() => ({
 
 vi.mock("@/lib/db/client", () => ({ prisma: mockPrisma }));
 
-import { adMediaFor } from "../lib/polling/comment-reconciler";
+import { adMediaFor, orderForSweep } from "../lib/polling/comment-reconciler";
 
 const POST = "18023946917554990";
 const AD = "17899788633163100";
@@ -46,5 +46,23 @@ describe("adMediaFor", () => {
   it("swallows a query failure, leaving the post itself still swept", async () => {
     mockPrisma.$queryRaw.mockRejectedValue(new Error("connection lost"));
     await expect(adMediaFor(POST)).resolves.toEqual([]);
+  });
+});
+
+describe("orderForSweep", () => {
+  const c = (id: string, t: string) => ({ id, timestamp: t });
+  const list = [c("mid", "2026-09-30T12:00:00+0000"), c("old", "2026-09-29T23:00:00+0000"), c("new", "2026-09-30T21:00:00+0000")];
+
+  it("answers the oldest comment first by default", () => {
+    expect(orderForSweep(list, false).map((x) => x.id)).toEqual(["old", "mid", "new"]);
+  });
+
+  it("answers the newest first when asked", () => {
+    expect(orderForSweep(list, true).map((x) => x.id)).toEqual(["new", "mid", "old"]);
+  });
+
+  it("does not reorder the caller's array", () => {
+    orderForSweep(list, true);
+    expect(list.map((x) => x.id)).toEqual(["mid", "old", "new"]);
   });
 });
