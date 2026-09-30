@@ -197,3 +197,20 @@ function hourlyCapFor_now(id: string): number {
   const days = Math.max(0, Math.floor((Date.now() - Date.parse("2026-09-30T00:00:00Z")) / 86_400_000));
   return Math.min(RATE_LIMIT_MAX, Math.max(1, Math.floor(10 * Math.pow(1.4, days))));
 }
+
+describe("releaseDMSlot (warm-up)", () => {
+  it("does not give the slot back for a warming account", async () => {
+    vi.stubEnv("DM_WARMUP", JSON.stringify({ warm_1: { start: "2026-09-30", perHour: 10, dailyGrowth: 1.4 } }));
+    mockGet.mockResolvedValue("7");
+    const left = await releaseDMSlot("warm_1");
+    expect(mockDecr).not.toHaveBeenCalled();
+    expect(left).toBe(7);
+  });
+
+  it("still gives it back for other accounts", async () => {
+    vi.stubEnv("DM_WARMUP", "");
+    mockDecr.mockResolvedValue(4);
+    await releaseDMSlot("other_1");
+    expect(mockDecr).toHaveBeenCalled();
+  });
+});

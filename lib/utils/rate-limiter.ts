@@ -248,6 +248,13 @@ export async function releaseDMSlot(
 ): Promise<number> {
   const client = getRedis();
   const key = `rate:dm:${instagramAccountId}`;
+  // A warming account counts ATTEMPTS, not deliveries: while Instagram is
+  // blocking it every send fails, and giving the slot back let it try a DM on
+  // every comment (~460 failed sends in 45 minutes on 2026-09-30, which drew
+  // Meta's 613 throughput error on top of the block).
+  if (readWarmups()[instagramAccountId]) {
+    return toScriptNumber(await client.get(key));
+  }
   const next = await client.decr(key);
   if (next < 0) {
     await client.del(key);
