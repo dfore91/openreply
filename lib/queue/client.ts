@@ -34,6 +34,8 @@ export interface ProcessCommentJob {
   // from. Campaigns are bound to that post, so both ids have to be matched.
   originalMediaId?: string;
   requeueAttempt?: number;
+  // Set by scripts/tmp_dm_resend.ts so DM_DEFER_LIVE lets it through.
+  resend?: boolean;
   // Which path enqueued this comment. It is not copied to ProcessedComment or
   // used for reconciliation dedup.
   source?: CommentSource;

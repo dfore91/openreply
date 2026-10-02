@@ -67,7 +67,7 @@ async function tick(): Promise<boolean> {
   }
 
   const now = Date.now();
-  for (const [id, t] of recentlyAdded) if (now - t > 60 * 60 * 1000) recentlyAdded.delete(id);
+  for (const [id, t] of recentlyAdded) if (now - t > 10 * 60 * 1000) recentlyAdded.delete(id);
 
   const cap = hourlyCapFor(IG);
   const used = Number((await getRedisConnection().get(`rate:dm:${IG}`)) ?? 0);
@@ -101,6 +101,7 @@ async function tick(): Promise<boolean> {
         // At the cap the worker marks it skipped again instead of queueing
         // 30-minute retries; the next tick picks it back up.
         requeueAttempt: 3,
+        resend: true,
       },
       { delay: Math.round(i * gap), jobId: `resend_${r.commentId}_${now}` }
     );

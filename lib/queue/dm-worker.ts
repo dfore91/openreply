@@ -212,6 +212,13 @@ async function sendRevealDirectMessage({
 }
 
 
+function deferLiveDms(instagramAccountId: string): boolean {
+  return (process.env.DM_DEFER_LIVE ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .includes(instagramAccountId);
+}
+
 function connectionScope(data: DmQueueJob) {
   return data.accountConnectionId ? { instagramAccountId: data.accountConnectionId } : {};
 }
@@ -448,6 +455,24 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
     // DM already sent on an earlier pass; the public reply retry above was all
     // this run needed. Don't re-send the DM.
     if (!needsDm) continue;
+
+    // Cacao fork, 2026-10-02: an account listed in DM_DEFER_LIVE answers new
+    // comments with the public reply only and leaves the DM to the paced
+    // oldest-first resend (scripts/tmp_dm_resend.ts), so comments closest to
+    // Instagram's 7-day private-reply limit go first.
+    if (!job.data.resend && deferLiveDms(instagramAccountId)) {
+      await prisma.dmLog.update({
+        where: {
+          automationId_commentId: { automationId: automation.id, commentId },
+        },
+        data: {
+          status: "SKIPPED_RATE_LIMIT",
+          matchedKeyword: matchResult.matchedKeyword,
+          errorMessage: "Deferred to the oldest-first resend",
+        },
+      });
+      continue;
+    }
 
     // Meta allows exactly ONE private reply per comment, ever — across every
     // campaign. When several campaigns match the same comment (duplicated

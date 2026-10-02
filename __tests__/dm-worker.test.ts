@@ -861,6 +861,42 @@ describe("DM Worker — Full Pipeline", () => {
   });
 });
 
+describe("DM Worker — DM_DEFER_LIVE (oldest-first resend)", () => {
+  it("holds a live comment's DM for the resend and sends nothing", async () => {
+    vi.stubEnv("DM_DEFER_LIVE", "ig_456");
+    const processor = getProcessor();
+    await processor(createMockJob());
+
+    expect(mockReserveDMSlot).not.toHaveBeenCalled();
+    expect(mockReserveWorkspaceDMSend).not.toHaveBeenCalled();
+    expect(mockSendPrivateReply).not.toHaveBeenCalled();
+    expect(mockPrisma.dmLog.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "SKIPPED_RATE_LIMIT" }),
+      })
+    );
+    vi.unstubAllEnvs();
+  });
+
+  it("sends a resend job for a deferred account", async () => {
+    vi.stubEnv("DM_DEFER_LIVE", "ig_456");
+    const processor = getProcessor();
+    await processor(createMockJob({ ...mockJobData, resend: true }));
+
+    expect(mockSendPrivateReply).toHaveBeenCalled();
+    vi.unstubAllEnvs();
+  });
+
+  it("does not hold other accounts", async () => {
+    vi.stubEnv("DM_DEFER_LIVE", "someone_else");
+    const processor = getProcessor();
+    await processor(createMockJob());
+
+    expect(mockSendPrivateReply).toHaveBeenCalled();
+    vi.unstubAllEnvs();
+  });
+});
+
 describe("DM Worker — one private reply per comment", () => {
   it("should skip a campaign when another already used the comment's private reply", async () => {
     mockPrisma.dmLog.findFirst.mockImplementation(
