@@ -200,7 +200,18 @@ describe("hourlyCapFor (warm-up)", () => {
     vi.stubEnv("DM_WARMUP", warm);
     mockEval.mockResolvedValue([0, 10, 0]);
     await reserveDMSlot(IG);
-    expect(mockEval.mock.calls.at(-1)?.[3]).toBe(hourlyCapFor_now(IG));
+    const call = mockEval.mock.calls.at(-1);
+    expect(call?.[1]).toBe(2);
+    expect(call?.[3]).toBe(`rate:dm:pace:${IG}`);
+    expect(call?.[4]).toBe(hourlyCapFor_now(IG));
+  });
+
+  it("paces a warming account to an even share of its hourly cap", async () => {
+    const { paceMaxFor } = await import("../lib/utils/rate-limiter");
+    expect(paceMaxFor(55)).toBe(2);
+    expect(paceMaxFor(75)).toBe(3);
+    expect(paceMaxFor(100)).toBe(4);
+    expect(paceMaxFor(5)).toBe(1);
   });
 });
 

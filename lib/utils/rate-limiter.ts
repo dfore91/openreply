@@ -99,6 +99,46 @@ end
 return {1, next_count, max - next_count}
 `;
 
+/**
+ * Paced variant for warming accounts (Cacao fork, 2026-10-02). The hourly
+ * counter is a fixed window, so every retry queued while it was full fires the
+ * moment it resets: 53 DMs went out in ~12 minutes on 2026-10-02 under a 55/h
+ * cap. A second, short window (KEYS[2]) holds sends to an even pace.
+ */
+const RESERVE_PACED_DM_SLOT_SCRIPT = `
+local current = tonumber(redis.call("GET", KEYS[1]) or "0")
+local max = tonumber(ARGV[1])
+local ttl = tonumber(ARGV[2])
+local pace_max = tonumber(ARGV[3])
+local pace_ttl = tonumber(ARGV[4])
+
+if current >= max then
+  return {0, current, 0}
+end
+
+local paced = tonumber(redis.call("GET", KEYS[2]) or "0")
+if paced >= pace_max then
+  return {0, current, max - current}
+end
+
+local next_count = redis.call("INCR", KEYS[1])
+if next_count == 1 then
+  redis.call("EXPIRE", KEYS[1], ttl)
+end
+local next_paced = redis.call("INCR", KEYS[2])
+if next_paced == 1 then
+  redis.call("EXPIRE", KEYS[2], pace_ttl)
+end
+
+return {1, next_count, max - next_count}
+`;
+
+export const PACE_WINDOW = 120; // seconds
+
+export function paceMaxFor(hourlyCap: number): number {
+  return Math.max(1, Math.ceil((hourlyCap * PACE_WINDOW) / RATE_LIMIT_WINDOW));
+}
+
 function toScriptNumber(value: unknown): number {
   if (typeof value === "number") return value;
   if (typeof value === "string") return Number.parseInt(value, 10);
@@ -202,13 +242,19 @@ export async function reserveDMSlot(
   const client = getRedis();
   const key = `rate:dm:${instagramAccountId}`;
 
-  const result = await client.eval(
-    RESERVE_DM_SLOT_SCRIPT,
-    1,
-    key,
-    hourlyCapFor(instagramAccountId),
-    RATE_LIMIT_WINDOW
-  );
+  const cap = hourlyCapFor(instagramAccountId);
+  const result = readWarmups()[instagramAccountId]
+    ? await client.eval(
+        RESERVE_PACED_DM_SLOT_SCRIPT,
+        2,
+        key,
+        `rate:dm:pace:${instagramAccountId}`,
+        cap,
+        RATE_LIMIT_WINDOW,
+        paceMaxFor(cap),
+        PACE_WINDOW
+      )
+    : await client.eval(RESERVE_DM_SLOT_SCRIPT, 1, key, cap, RATE_LIMIT_WINDOW);
   const values = Array.isArray(result) ? result : [];
   const allowedFlag = toScriptNumber(values[0]);
   const count = toScriptNumber(values[1]);
