@@ -31,7 +31,15 @@ async function failureCheck(): Promise<{ sent: number; failed: number }> {
   const since = new Date(Date.now() - 20 * 60 * 1000);
   const [sent, failed] = await Promise.all([
     prisma.dmLog.count({ where: { instagramAccountId: ACC, status: "SENT", dmSentAt: { gte: since } } }),
-    prisma.dmLog.count({ where: { instagramAccountId: ACC, status: "FAILED", updatedAt: { gte: since } } }),
+    // A deleted or unknown account ("user not found") is not a block signal.
+    prisma.dmLog.count({
+      where: {
+        instagramAccountId: ACC,
+        status: "FAILED",
+        updatedAt: { gte: since },
+        NOT: [{ errorMessage: { contains: "nicht gefunden" } }, { errorMessage: { contains: "not found" } }],
+      },
+    }),
   ]);
   return { sent, failed };
 }
