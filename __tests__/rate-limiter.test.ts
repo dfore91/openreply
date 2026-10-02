@@ -178,6 +178,18 @@ describe("hourlyCapFor (warm-up)", () => {
     expect(hourlyCapFor(IG, day("2026-12-31"))).toBe(RATE_LIMIT_MAX);
   });
 
+  it("never rises above maxPerHour when one is set", async () => {
+    vi.stubEnv(
+      "DM_WARMUP",
+      JSON.stringify({ [IG]: { start: "2026-10-02", perHour: 55, dailyGrowth: 1.37, maxPerHour: 100 } })
+    );
+    const { hourlyCapFor } = await import("../lib/utils/rate-limiter");
+    expect(hourlyCapFor(IG, day("2026-10-02"))).toBe(55);
+    expect(hourlyCapFor(IG, day("2026-10-03"))).toBe(75);
+    expect(hourlyCapFor(IG, day("2026-10-04"))).toBe(100);
+    expect(hourlyCapFor(IG, day("2026-10-20"))).toBe(100);
+  });
+
   it("falls back to Meta's cap on a malformed variable", async () => {
     vi.stubEnv("DM_WARMUP", "{not json");
     const { hourlyCapFor } = await import("../lib/utils/rate-limiter");

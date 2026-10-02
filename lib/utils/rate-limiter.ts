@@ -30,10 +30,10 @@ const RATE_LIMIT_MAX = 750; // private replies per hour, per Meta's documented c
  *   DM_WARMUP='{"<instagramId>":{"start":"2026-09-30","perHour":10,"dailyGrowth":1.4}}'
  *
  * cap = floor(perHour * dailyGrowth ^ fullDaysSince(start)), never above
- * RATE_LIMIT_MAX. Days count from 00:00 UTC of `start`. Accounts not listed
+ * maxPerHour (optional) or RATE_LIMIT_MAX. Days count from 00:00 UTC of `start`. Accounts not listed
  * (and a missing or malformed variable) keep RATE_LIMIT_MAX.
  */
-type Warmup = { start: string; perHour: number; dailyGrowth: number };
+type Warmup = { start: string; perHour: number; dailyGrowth: number; maxPerHour?: number };
 
 function readWarmups(): Record<string, Warmup> {
   const raw = process.env.DM_WARMUP;
@@ -54,7 +54,8 @@ export function hourlyCapFor(instagramAccountId: string, now: number = Date.now(
   const growth = Number(w.dailyGrowth);
   if (!Number.isFinite(start) || !(perHour > 0) || !(growth >= 1)) return RATE_LIMIT_MAX;
   const days = Math.max(0, Math.floor((now - start) / 86_400_000));
-  return Math.min(RATE_LIMIT_MAX, Math.max(1, Math.floor(perHour * Math.pow(growth, days))));
+  const ceiling = Number(w.maxPerHour) > 0 ? Math.min(RATE_LIMIT_MAX, Number(w.maxPerHour)) : RATE_LIMIT_MAX;
+  return Math.min(ceiling, Math.max(1, Math.floor(perHour * Math.pow(growth, days))));
 }
 const RATE_LIMIT_WINDOW = 3600; // 1 hour in seconds
 const REQUEUE_DELAY_MS = 30 * 60 * 1000; // 30 minutes
